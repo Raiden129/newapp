@@ -218,9 +218,9 @@ export function PanelMode({
   // Optimized camera rendering with status handling
   const renderCamera = useCallback((camera: Camera, index: number, total: number, layout: string) => {
     const status = getCameraStatus(camera.id);
-    const isVisible = !isFullscreen || isVisible;
+    const cameraVisible = !isFullscreen || isVisible;
     
-    if (!isVisible) return null;
+    if (!cameraVisible) return null;
 
     return (
       <div
@@ -328,6 +328,21 @@ export function PanelMode({
     return { total, playing, errors };
   }, [activeCameras.length, cameraStatuses]);
 
+  // Handle stopping all cameras
+  const handleStopAll = useCallback(() => {
+    activeCameras.forEach(camera => {
+      // Update camera status to stopped
+      setCameraStatuses(prev => ({
+        ...prev,
+        [camera.id]: {
+          status: 'error',
+          lastUpdate: Date.now(),
+          errorMessage: 'Stopped by user'
+        }
+      }));
+    });
+  }, [activeCameras]);
+
   // Full-screen mode rendering
   if (isFullscreen) {
     return (
@@ -346,7 +361,11 @@ export function PanelMode({
         {streamStats.total > 0 && (
           <div className="fixed top-4 right-4 z-50 bg-black/70 backdrop-blur-sm rounded-lg px-3 py-2 text-white text-sm">
             <div className="flex items-center gap-2">
-              <StatusIndicator status={streamStats.errors > 0 ? 'error' : streamStats.playing > 0 ? 'playing' : 'loading'} />
+              <div className={`w-2 h-2 rounded-full ${
+                streamStats.errors > 0 ? 'bg-red-500' : 
+                streamStats.playing > 0 ? 'bg-green-500' : 
+                'bg-yellow-500'
+              }`} />
               <span>{streamStats.playing}/{streamStats.total}</span>
             </div>
           </div>
@@ -463,16 +482,9 @@ export function PanelMode({
         {activeCameras.length > 0 ? (
           <div className="h-full w-full">
             <div className={`grid gap-0 h-full ${currentLayout}`}>
-              {activeCameras.map((camera, index) => (
-                <CameraView
-                  key={camera.id}
-                  camera={camera}
-                  index={index}
-                  total={activeCameras.length}
-                  layout={activeCameras.length === 5 || activeCameras.length === 6 ? fiveCamLayout : ''}
-                  isVisible={isVisible}
-                />
-              ))}
+              {activeCameras.map((camera, index) => 
+                renderCamera(camera, index, activeCameras.length, activeCameras.length === 5 || activeCameras.length === 6 ? fiveCamLayout : '')
+              )}
             </div>
           </div>
         ) : (
@@ -483,14 +495,14 @@ export function PanelMode({
               <p className="text-muted-foreground mb-4">
                 Start cameras to view them in panel mode.
               </p>
-              <Button 
-                onClick={onExitFullscreen}
-                variant="outline"
-                className="bg-white/10 border-white/20 hover:bg-white/20"
-              >
-                <Home className="w-4 h-4 mr-2" />
-                Go to Home
-              </Button>
+                          <Button 
+              onClick={onExitFullscreen}
+              variant="outline"
+              className="bg-white/10 border-white/20 hover:bg-white/20"
+            >
+              <Home className="w-4 h-4 mr-2" />
+              Go to Home
+            </Button>
             </div>
           </div>
         )}
@@ -516,7 +528,11 @@ export function PanelMode({
             <p>Camera monitoring • {streamStats.total} active cameras</p>
             {streamStats.total > 0 && (
               <div className="flex items-center gap-2 text-sm">
-                <StatusIndicator status={streamStats.errors > 0 ? 'error' : streamStats.playing > 0 ? 'playing' : 'loading'} />
+                <div className={`w-2 h-2 rounded-full ${
+                  streamStats.errors > 0 ? 'bg-red-500' : 
+                  streamStats.playing > 0 ? 'bg-green-500' : 
+                  'bg-yellow-500'
+                }`} />
                 <span>{streamStats.playing} playing, {streamStats.errors} errors</span>
               </div>
             )}
@@ -576,16 +592,9 @@ export function PanelMode({
       {activeCameras.length > 0 ? (
         <div className="h-[calc(100vh-200px)] w-full">
           <div className={`grid gap-4 h-full ${currentLayout}`}>
-            {activeCameras.map((camera, index) => (
-              <CameraView
-                key={camera.id}
-                camera={camera}
-                index={index}
-                total={activeCameras.length}
-                layout={activeCameras.length === 5 || activeCameras.length === 6 ? fiveCamLayout : ''}
-                isVisible={isVisible}
-              />
-            ))}
+            {activeCameras.map((camera, index) => 
+              renderCamera(camera, index, activeCameras.length, activeCameras.length === 5 || activeCameras.length === 6 ? fiveCamLayout : '')
+            )}
           </div>
         </div>
       ) : (
