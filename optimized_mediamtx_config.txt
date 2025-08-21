@@ -7,25 +7,25 @@ logLevel: info
 logDestinations: [stdout]
 logFile: mediamtx.log
 
-# Reduced timeouts for lower latency
-readTimeout: 10s
-writeTimeout: 10s
+# Increased timeouts for stability with unstable sources
+readTimeout: 30s
+writeTimeout: 30s
 # Increased queue size for stability with unstable sources
-writeQueueSize: 4096
+writeQueueSize: 8192
 udpMaxPayloadSize: 1472
 
 ###############################################
 # Global settings -> RTSP server
 
 rtsp: yes
-rtspTransports: [tcp, udp]  # TCP first for stability, UDP as fallback
+rtspTransports: [tcp]  # TCP only for stability, remove UDP to prevent packet loss
 rtspEncryption: "no"
 rtspAddress: :8554
 rtpAddress: :8000
 rtcpAddress: :8001
 rtspAuthMethods: [basic]
 # Increased buffer for stability
-rtspUDPReadBufferSize: 2097152  # 2MB buffer
+rtspUDPReadBufferSize: 4194304  # 4MB buffer
 
 ###############################################
 # Global settings -> RTMP server
@@ -35,26 +35,26 @@ rtmpAddress: :1935
 rtmpEncryption: "no"
 
 ###############################################
-# Global settings -> HLS server (Optimized for Low Latency)
+# Global settings -> HLS server (Fixed Duration for iOS Compatibility)
 
 hls: yes
 hlsAddress: :8888
 hlsEncryption: no
 hlsAllowOrigin: '*'
 hlsTrustedProxies: []
-hlsAlwaysRemux: yes  # Keep this for immediate availability
-# Use Low-Latency HLS for minimal delay
-hlsVariant: lowLatency
-# Reduced segment count for lower latency
-hlsSegmentCount: 3
-# Much shorter segments for low latency
-hlsSegmentDuration: 2s
-# Very short parts for LL-HLS
-hlsPartDuration: 200ms
+hlsAlwaysRemux: yes
+# Use standard HLS for better compatibility
+hlsVariant: standard
+# Fixed segment count for consistency
+hlsSegmentCount: 6
+# Fixed segment duration to prevent iOS errors
+hlsSegmentDuration: 4s
+# Fixed part duration to prevent iOS errors
+hlsPartDuration: 400ms
 hlsSegmentMaxSize: 50M
 hlsDirectory: ''
-# Reduced close time for responsiveness
-hlsMuxerCloseAfter: 30s
+# Increased close time for stability
+hlsMuxerCloseAfter: 60s
 
 ###############################################
 # Global settings -> WebRTC server (Lowest Latency Option)
@@ -70,10 +70,10 @@ webrtcIPsFromInterfaces: yes
 webrtcIPsFromInterfacesList: []
 webrtcAdditionalHosts: []
 webrtcICEServers2: []
-# Reduced timeouts for faster connection
-webrtcHandshakeTimeout: 5s
-webrtcTrackGatherTimeout: 1s
-webrtcSTUNGatherTimeout: 3s
+# Increased timeouts for stability
+webrtcHandshakeTimeout: 10s
+webrtcTrackGatherTimeout: 5s
+webrtcSTUNGatherTimeout: 10s
 
 ###############################################
 # Global settings -> SRT server
@@ -87,10 +87,10 @@ srtAddress: :8890
 pathDefaults:
   source: publisher
   sourceFingerprint:
-  # Enable on-demand for efficiency but with quick start
-  sourceOnDemand: yes
-  sourceOnDemandStartTimeout: 5s
-  sourceOnDemandCloseAfter: 30s
+  # Disable on-demand for stability
+  sourceOnDemand: no
+  sourceOnDemandStartTimeout: 10s
+  sourceOnDemandCloseAfter: 120s
   maxReaders: 0
   srtReadPassphrase:
   fallback:
@@ -102,12 +102,14 @@ pathDefaults:
   srtPublishPassphrase:
   
   # RTSP source settings optimized for your cameras
-  rtspTransport: tcp  # TCP is more reliable for unstable networks
+  rtspTransport: tcp  # TCP only for stability
   rtspAnyPort: no
   rtspRangeType:
   rtspRangeStart:
   # Larger buffer for unstable sources
-  rtspUDPReadBufferSize: 2097152  # 2MB
+  rtspUDPReadBufferSize: 4194304  # 4MB
+  # Increased timeout for unstable sources
+  rtspTimeout: 30s
 
 ###############################################
 # Camera-specific paths with optimizations
@@ -116,43 +118,64 @@ paths:
   cam1:
     source: rtsp://admin:WIQQAU@192.168.0.2:554
     rtspTransport: tcp
-    # Quick reconnection for unstable sources
-    sourceOnDemand: no  # Keep always connected for main cameras
-    sourceOnDemandStartTimeout: 3s
-    sourceOnDemandCloseAfter: 60s
+    # Keep always connected for stability
+    sourceOnDemand: no
+    sourceOnDemandStartTimeout: 10s
+    sourceOnDemandCloseAfter: 120s
     # Larger buffer for this camera
-    rtspUDPReadBufferSize: 4194304  # 4MB for main camera
+    rtspUDPReadBufferSize: 8388608  # 8MB for main camera
+    rtspTimeout: 45s
+    # Enable fallback for stability
+    fallback: cam1_backup
     
   cam2:
     source: rtsp://admin:QVKTZJ@192.168.0.3:554
     rtspTransport: tcp
     sourceOnDemand: no
-    sourceOnDemandStartTimeout: 3s
-    sourceOnDemandCloseAfter: 60s
-    rtspUDPReadBufferSize: 4194304
+    sourceOnDemandStartTimeout: 10s
+    sourceOnDemandCloseAfter: 120s
+    rtspUDPReadBufferSize: 8388608
+    rtspTimeout: 45s
+    # Enable fallback for stability
+    fallback: cam2_backup
     
   cam3_fixed:
     source: rtsp://admin:WAYPTA@192.168.0.4:554/Streaming/Channels/102
     rtspTransport: tcp
     sourceOnDemand: no
-    sourceOnDemandStartTimeout: 3s
-    sourceOnDemandCloseAfter: 60s
-    rtspUDPReadBufferSize: 4194304
+    sourceOnDemandStartTimeout: 10s
+    sourceOnDemandCloseAfter: 120s
+    rtspUDPReadBufferSize: 8388608
+    rtspTimeout: 45s
+    # Add retry mechanism
+    sourceOnDemandRetryDelay: 5s
+    sourceOnDemandMaxRetries: 3
     
   cam4:
     source: rtsp://admin%40123:Admin%40123@192.168.0.8:554/stream2
     rtspTransport: tcp
     sourceOnDemand: no
-    sourceOnDemandStartTimeout: 3s
-    sourceOnDemandCloseAfter: 60s
-    rtspUDPReadBufferSize: 4194304
+    sourceOnDemandStartTimeout: 10s
+    sourceOnDemandCloseAfter: 120s
+    rtspUDPReadBufferSize: 8388608
+    rtspTimeout: 45s
 
-  # Optional: Add fallback streams for critical cameras
+  # Fallback streams for critical cameras
   cam1_backup:
     source: rtsp://admin:WIQQAU@192.168.0.2:554/backup
     rtspTransport: tcp
     sourceOnDemand: yes
-    fallback: cam1
+    sourceOnDemandStartTimeout: 5s
+    sourceOnDemandCloseAfter: 60s
+    rtspUDPReadBufferSize: 4194304
+    
+  cam2_backup:
+    source: rtsp://admin:QVKTZJ@192.168.0.3:554/backup
+    rtspTransport: tcp
+    sourceOnDemand: yes
+    sourceOnDemandStartTimeout: 5s
+    sourceOnDemandCloseAfter: 60s
+    rtspUDPReadBufferSize: 4194304
 
 ###############################################
 # Optional: Enable API for monitoring

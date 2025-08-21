@@ -117,7 +117,23 @@ export function PanelMode({
       }
     };
     
-    handleCamerasChange();
+    // Force refresh when entering panel mode
+    const initializePanelMode = async () => {
+      try {
+        await cameraStore.forceRefreshCameraStatus();
+        if (isSubscribed) {
+          setCameras(cameraStore.getCameras());
+        }
+      } catch (error) {
+        console.error('Error initializing panel mode:', error);
+        // Fallback to regular camera loading
+        if (isSubscribed) {
+          setCameras(cameraStore.getCameras());
+        }
+      }
+    };
+    
+    initializePanelMode();
     const unsubscribe = cameraStore.subscribe(handleCamerasChange);
     
     return () => {
