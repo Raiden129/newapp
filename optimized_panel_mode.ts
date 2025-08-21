@@ -199,88 +199,116 @@ export function PanelMode({
     }));
   }, []);
 
-  const handleStopAll = useCallback(() => {
-    cameraStore.stopAllCameras();
-    setCameraStatuses({});
-  }, []);
-
-  // Status indicator component
-  const StatusIndicator = React.memo(({ status }: { status: 'loading' | 'playing' | 'error' | 'stalled' }) => {
-    const config = {
-      loading: { color: 'bg-yellow-500', icon: null },
-      playing: { color: 'bg-green-500', icon: <Wifi className="w-3 h-3" /> },
-      error: { color: 'bg-red-500', icon: <WifiOff className="w-3 h-3" /> },
-      stalled: { color: 'bg-orange-500', icon: <AlertTriangle className="w-3 h-3" /> }
-    };
-
-    const { color, icon } = config[status] || config.loading;
+  // Enhanced camera status management
+  const getCameraStatus = useCallback((cameraId: string) => {
+    const camera = cameras.find(c => c.id === cameraId);
+    const statusInfo = cameraStatuses[cameraId];
     
-    return (
-      <div className={`${color} rounded-full w-3 h-3 flex items-center justify-center`}>
-        {icon && <div className="text-white">{icon}</div>}
-      </div>
-    );
-  });
-
-  // Optimized camera view component
-  const CameraView = React.memo(({ 
-    camera, 
-    index, 
-    total, 
-    layout, 
-    isVisible 
-  }: { 
-    camera: Camera; 
-    index: number; 
-    total: number; 
-    layout: string;
-    isVisible: boolean;
-  }) => {
-    const cameraStatus = cameraStatuses[camera.id];
-    const currentStatus = cameraStatus?.status || 'loading';
+    if (!camera) return 'error';
+    if (!camera.isActive) return 'inactive';
+    if (camera.status === 'offline') return 'offline';
+    if (statusInfo?.status === 'error') return 'error';
+    if (statusInfo?.status === 'stalled') return 'stalled';
+    if (statusInfo?.status === 'playing') return 'playing';
+    if (camera.status === 'online') return 'loading';
     
+    return 'checking';
+  }, [cameras, cameraStatuses]);
+
+  // Optimized camera rendering with status handling
+  const renderCamera = useCallback((camera: Camera, index: number, total: number, layout: string) => {
+    const status = getCameraStatus(camera.id);
+    const isVisible = !isFullscreen || isVisible;
+    
+    if (!isVisible) return null;
+
     return (
-      <div className={`bg-black relative overflow-hidden group ${getCameraStyle(index, total, layout)} ${
-        isFullscreen ? 'rounded-none' : 'rounded-lg'
-      }`}>
+      <div
+        key={camera.id}
+        className={`relative bg-black rounded-lg overflow-hidden ${
+          getCameraStyle(index, total, layout)
+        }`}
+      >
+        <VideoPlayer
+          camera={camera}
+          onStatusChange={(status) => handleCameraStatusChange(camera.id, status)}
+          onError={(error) => handleCameraError(camera.id, error)}
+          autoPlay={camera.isActive}
+          muted={true}
+          showControls={false}
+          className="w-full h-full"
+        />
         
-        {/* Only render VideoPlayer when visible for performance */}
-        {isVisible && (
-          <VideoPlayer 
-            src={camera.hlsUrl}
-            lowLatency={true}
-            maxRetries={3}
-            onStatusChange={(status) => handleCameraStatusChange(camera.id, status)}
-            onError={(error) => handleCameraError(camera.id, error)}
-          />
-        )}
-        
-        {/* Loading placeholder when not visible */}
-        {!isVisible && (
-          <div className="w-full h-full flex items-center justify-center bg-gray-900">
-            <Monitor className="w-8 h-8 text-gray-500" />
+        {/* Enhanced status overlay */}
+        <div className="absolute top-2 left-2 flex items-center gap-2">
+          <div className={`px-2 py-1 rounded text-xs font-medium ${
+            status === 'playing' ? 'bg-green-500 text-white' :
+            status === 'loading' ? 'bg-yellow-500 text-white' :
+            status === 'error' ? 'bg-red-500 text-white' :
+            status === 'stalled' ? 'bg-orange-500 text-white' :
+            status === 'offline' ? 'bg-gray-500 text-white' :
+            'bg-blue-500 text-white'
+          }`}>
+            {status === 'playing' ? 'Live' :
+             status === 'loading' ? 'Loading...' :
+             status === 'error' ? 'Error' :
+             status === 'stalled' ? 'Stalled' :
+             status === 'offline' ? 'Offline' :
+             'Checking...'}
           </div>
-        )}
+          
+          {/* Connection quality indicator */}
+          {status === 'playing' && (
+            <div className="flex items-center gap-1">
+              <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+              <span className="text-xs text-white">Live</span>
+            </div>
+          )}
+        </div>
         
         {/* Camera name overlay */}
-        <div className="absolute top-2 left-2 bg-black/70 backdrop-blur-sm rounded px-2 py-1 text-white text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-          {camera.name}
+        <div className="absolute bottom-2 left-2">
+          <div className="px-2 py-1 rounded bg-black/50 text-white text-sm font-medium">
+            {camera.name}
+          </div>
         </div>
         
-        {/* Status indicator */}
-        <div className="absolute top-3 right-3">
-          <StatusIndicator status={currentStatus} />
-        </div>
-
         {/* Error message overlay */}
-        {currentStatus === 'error' && cameraStatus?.errorMessage && (
-          <div className="absolute bottom-2 left-2 right-2 bg-red-900/90 backdrop-blur-sm rounded px-2 py-1 text-white text-xs opacity-0 group-hover:opacity-100 transition-opacity">
-            {cameraStatus.errorMessage}
+        {status === 'error' && cameraStatuses[camera.id]?.errorMessage && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/75">
+            <div className="text-center p-4">
+              <AlertTriangle className="w-8 h-8 text-red-500 mx-auto mb-2" />
+              <p className="text-red-400 text-sm">{cameraStatuses[camera.id]?.errorMessage}</p>
+            </div>
           </div>
         )}
       </div>
     );
-  });
+  }, [cameras, cameraStatuses, isFullscreen, isVisible, getCameraStatus, handleCameraStatusChange, handleCameraError, getCameraStyle]);
+
+  // Optimized grid rendering
+  const renderGrid = useCallback((cameras: Camera[], layout: string) => {
+    if (cameras.length === 0) {
+      return (
+        <div className="flex items-center justify-center h-64 text-gray-500">
+          <div className="text-center">
+            <Monitor className="w-12 h-12 mx-auto mb-4 opacity-50" />
+            <p>No cameras available</p>
+          </div>
+        </div>
+      );
+    }
+
+    const gridClass = getGridLayout(cameras.length, layout);
+    
+    return (
+      <div className={`grid gap-2 ${gridClass}`}>
+        {cameras.map((camera, index) => 
+          renderCamera(camera, index, cameras.length, layout)
+        )}
+      </div>
+    );
+  }, [renderCamera, getGridLayout]);
 
   // Memoize layout calculation
   const currentLayout = useMemo(() => {
