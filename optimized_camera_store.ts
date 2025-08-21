@@ -168,13 +168,14 @@ class CameraStore {
         .filter(config => config && config.name)
         .map((config: any) => {
           const existingCamera = this.cameras.find(c => c.id === config.name);
+          const isActive = existingCamera?.isActive ?? true; // Default to active for new cameras
           
           return {
             id: config.name,
             name: this.formatCameraName(config.name),
             source: config.source || 'unknown',
             status: config.error ? 'error' : (this.healthStatus[config.name]?.status || 'checking'),
-            isActive: existingCamera?.isActive || false,
+            isActive: isActive,
             hlsUrl: this.generateHlsUrl(config.name),
             webrtcUrl: this.generateWebrtcUrl(config.name),
             lastSeen: existingCamera?.lastSeen || Date.now(),
@@ -232,36 +233,63 @@ class CameraStore {
 
     const healthChecks = this.cameras.map(async (camera) => {
       try {
-        // Quick health check via HLS manifest
+        // Quick health check via HLS manifest with longer timeout
         const response = await fetch(camera.hlsUrl!, {
           method: 'HEAD',
-          signal: AbortSignal.timeout(3000)
+          signal: AbortSignal.timeout(5000) // Increased timeout to 5s
         });
 
-        const newStatus: Camera['status'] = response.ok ? 'online' : 'offline';
+        let newStatus: Camera['status'];
+        if (response.ok) {
+          newStatus = 'online';
+        } else if (response.status === 404) {
+          // 404 might mean stream is starting up, don't mark as offline immediately
+          newStatus = this.healthStatus[camera.id]?.status === 'online' ? 'online' : 'checking';
+        } else {
+          newStatus = 'offline';
+        }
+
         const currentHealth = this.healthStatus[camera.id] || { status: 'checking', lastCheck: 0, errorCount: 0 };
+        
+        // Only increment error count for actual failures
+        const errorCount = response.ok ? 0 : currentHealth.errorCount + 1;
         
         this.healthStatus[camera.id] = {
           status: newStatus,
           lastCheck: Date.now(),
-          errorCount: response.ok ? 0 : currentHealth.errorCount + 1
+          errorCount: errorCount
         };
 
-        // Update camera status if changed
+        // Update camera status if changed, but be more conservative about marking as offline
         if (camera.status !== newStatus) {
+          // Only mark as offline after multiple consecutive failures
+          if (newStatus === 'offline' && errorCount < 3) {
+            newStatus = 'checking';
+          }
           this.updateCameraStatus(camera.id, newStatus);
         }
 
       } catch (error) {
         const currentHealth = this.healthStatus[camera.id] || { status: 'checking', lastCheck: 0, errorCount: 0 };
+        const errorCount = currentHealth.errorCount + 1;
+        
+        // Don't immediately mark as error, give it a few attempts
+        let newStatus: Camera['status'] = 'checking';
+        if (errorCount >= 3) {
+          newStatus = 'error';
+        } else if (currentHealth.status === 'online') {
+          // Keep online status for a few failures to prevent flickering
+          newStatus = 'online';
+        }
+        
         this.healthStatus[camera.id] = {
-          status: 'error',
+          status: newStatus,
           lastCheck: Date.now(),
-          errorCount: currentHealth.errorCount + 1
+          errorCount: errorCount
         };
 
-        if (camera.status !== 'error') {
-          this.updateCameraStatus(camera.id, 'error');
+        if (camera.status !== newStatus) {
+          this.updateCameraStatus(camera.id, newStatus);
         }
       }
     });
@@ -327,9 +355,9 @@ class CameraStore {
       source: camera.source,
       rtspTransport: 'tcp',
       sourceOnDemand: false, // Keep streams always available for better performance
-      sourceOnDemandStartTimeout: '3s',
-      sourceOnDemandCloseAfter: '60s',
-      rtspUDPReadBufferSize: 4194304 // 4MB buffer for stability
+      sourceOnDemandStartTimeout: '10s',
+      sourceOnDemandCloseAfter: '120s',
+      rtspUDPReadBufferSize: 8388608 // 8MB buffer for stability
     };
 
     try {
@@ -351,6 +379,25 @@ class CameraStore {
       console.error('Error adding camera:', error);
       return false;
     }
+  }
+
+  // Force refresh camera status for panel mode
+  async forceRefreshCameraStatus(): Promise<void> {
+    // Clear health status cache to force fresh checks
+    this.healthStatus = {};
+    
+    // Reload cameras with fresh data
+    await this.loadCameras(true);
+    
+    // Trigger immediate health check
+    await this.checkCamerasHealth();
+  }
+
+  // Get cameras with forced refresh for panel mode
+  async getCamerasForPanel(): Promise<Camera[]> {
+    // Force refresh when accessing panel mode
+    await this.forceRefreshCameraStatus();
+    return this.cameras.filter(camera => camera.isActive);
   }
 
   async removeCamera(id: string): Promise<boolean> {
