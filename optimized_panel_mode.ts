@@ -1,8 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Button } from './ui/button';
-import { VideoPlayer } from './VideoPlayer';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { cameraStore, type Camera } from '../lib/camera-store';
+import { cameraStore, type Camera } from './optimized_camera_store';
 import { 
   Maximize2, 
   Grid3X3, 
@@ -218,9 +215,9 @@ export function PanelMode({
   // Optimized camera rendering with status handling
   const renderCamera = useCallback((camera: Camera, index: number, total: number, layout: string) => {
     const status = getCameraStatus(camera.id);
-    const isVisible = !isFullscreen || isVisible;
+    const cameraVisible = !isFullscreen || isVisible;
     
-    if (!isVisible) return null;
+    if (!cameraVisible) return null;
 
     return (
       <div
@@ -229,15 +226,17 @@ export function PanelMode({
           getCameraStyle(index, total, layout)
         }`}
       >
-        <VideoPlayer
-          camera={camera}
-          onStatusChange={(status) => handleCameraStatusChange(camera.id, status)}
-          onError={(error) => handleCameraError(camera.id, error)}
+        <video
           autoPlay={camera.isActive}
           muted={true}
-          showControls={false}
+          controls={false}
           className="w-full h-full"
-        />
+          onLoadStart={() => handleCameraStatusChange(camera.id, 'loading')}
+          onCanPlay={() => handleCameraStatusChange(camera.id, 'playing')}
+          onError={() => handleCameraError(camera.id, 'Video playback error')}
+        >
+          <source src={camera.hlsUrl || camera.webrtcUrl} type="application/x-mpegURL" />
+        </video>
         
         {/* Enhanced status overlay */}
         <div className="absolute top-2 left-2 flex items-center gap-2">
@@ -328,25 +327,42 @@ export function PanelMode({
     return { total, playing, errors };
   }, [activeCameras.length, cameraStatuses]);
 
+  // Handle stopping all cameras
+  const handleStopAll = useCallback(() => {
+    activeCameras.forEach(camera => {
+      // Update camera status to stopped
+      setCameraStatuses(prev => ({
+        ...prev,
+        [camera.id]: {
+          status: 'error',
+          lastUpdate: Date.now(),
+          errorMessage: 'Stopped by user'
+        }
+      }));
+    });
+  }, [activeCameras]);
+
   // Full-screen mode rendering
   if (isFullscreen) {
     return (
       <div className="h-screen w-screen bg-black relative overflow-hidden">
         {/* Floating controls toggle */}
-        <Button
+        <button
           onClick={() => setShowControls(!showControls)}
-          className="fixed top-4 left-4 z-50 bg-black/70 hover:bg-black/90 border-gray-600 transition-all duration-200"
-          size="sm"
-          variant="outline"
+          className="fixed top-4 left-4 z-50 bg-black/70 hover:bg-black/90 border-gray-600 transition-all duration-200 px-3 py-2 rounded border text-white"
         >
           {showControls ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
-        </Button>
+        </button>
 
         {/* Stream health indicator */}
         {streamStats.total > 0 && (
           <div className="fixed top-4 right-4 z-50 bg-black/70 backdrop-blur-sm rounded-lg px-3 py-2 text-white text-sm">
             <div className="flex items-center gap-2">
-              <StatusIndicator status={streamStats.errors > 0 ? 'error' : streamStats.playing > 0 ? 'playing' : 'loading'} />
+              <div className={`w-2 h-2 rounded-full ${
+                streamStats.errors > 0 ? 'bg-red-500' : 
+                streamStats.playing > 0 ? 'bg-green-500' : 
+                'bg-yellow-500'
+              }`} />
               <span>{streamStats.playing}/{streamStats.total}</span>
             </div>
           </div>
@@ -363,14 +379,12 @@ export function PanelMode({
                 <Monitor className="w-6 h-6 text-primary" />
                 <h1 className="text-xl font-semibold">SecureCam</h1>
               </div>
-              <Button
-                variant="ghost"
-                size="sm"
+              <button
                 onClick={onToggleDarkMode}
-                className="w-9 h-9 p-0"
+                className="w-9 h-9 p-0 bg-transparent hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
               >
                 {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-              </Button>
+              </button>
             </div>
 
             {/* Panel controls */}
@@ -427,10 +441,10 @@ export function PanelMode({
               )}
 
               {activeCameras.length > 0 && (
-                <Button onClick={handleStopAll} variant="destructive" className="w-full">
+                <button onClick={handleStopAll} className="w-full px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded">
                   <Square className="w-4 h-4 mr-2" />
                   Stop All Cameras
-                </Button>
+                </button>
               )}
             </div>
 
@@ -463,16 +477,9 @@ export function PanelMode({
         {activeCameras.length > 0 ? (
           <div className="h-full w-full">
             <div className={`grid gap-0 h-full ${currentLayout}`}>
-              {activeCameras.map((camera, index) => (
-                <CameraView
-                  key={camera.id}
-                  camera={camera}
-                  index={index}
-                  total={activeCameras.length}
-                  layout={activeCameras.length === 5 || activeCameras.length === 6 ? fiveCamLayout : ''}
-                  isVisible={isVisible}
-                />
-              ))}
+              {activeCameras.map((camera, index) => 
+                renderCamera(camera, index, activeCameras.length, activeCameras.length === 5 || activeCameras.length === 6 ? fiveCamLayout : '')
+              )}
             </div>
           </div>
         ) : (
@@ -483,14 +490,13 @@ export function PanelMode({
               <p className="text-muted-foreground mb-4">
                 Start cameras to view them in panel mode.
               </p>
-              <Button 
-                onClick={onExitFullscreen}
-                variant="outline"
-                className="bg-white/10 border-white/20 hover:bg-white/20"
-              >
-                <Home className="w-4 h-4 mr-2" />
-                Go to Home
-              </Button>
+                          <button 
+              onClick={onExitFullscreen}
+              className="bg-white/10 border-white/20 hover:bg-white/20 px-4 py-2 rounded border text-white"
+            >
+              <Home className="w-4 h-4 mr-2" />
+              Go to Home
+            </button>
             </div>
           </div>
         )}
@@ -516,7 +522,11 @@ export function PanelMode({
             <p>Camera monitoring • {streamStats.total} active cameras</p>
             {streamStats.total > 0 && (
               <div className="flex items-center gap-2 text-sm">
-                <StatusIndicator status={streamStats.errors > 0 ? 'error' : streamStats.playing > 0 ? 'playing' : 'loading'} />
+                <div className={`w-2 h-2 rounded-full ${
+                  streamStats.errors > 0 ? 'bg-red-500' : 
+                  streamStats.playing > 0 ? 'bg-green-500' : 
+                  'bg-yellow-500'
+                }`} />
                 <span>{streamStats.playing} playing, {streamStats.errors} errors</span>
               </div>
             )}
@@ -524,10 +534,10 @@ export function PanelMode({
         </div>
 
         <div className="flex items-center gap-3">
-          <Button onClick={onToggleFullscreen} variant="outline" size="sm">
+          <button onClick={onToggleFullscreen} className="px-3 py-2 border rounded hover:bg-gray-100 dark:hover:bg-gray-800">
             <Maximize2 className="w-4 h-4 mr-2" />
             Fullscreen
-          </Button>
+          </button>
 
           {activeCameras.length === 2 && (
             <Select value={twoCamLayout} onValueChange={(value: any) => setTwoCamLayout(value)}>
@@ -565,10 +575,10 @@ export function PanelMode({
           )}
           
           {activeCameras.length > 0 && (
-            <Button onClick={handleStopAll} variant="destructive" size="sm">
+            <button onClick={handleStopAll} className="px-3 py-2 bg-red-600 hover:bg-red-700 text-white rounded">
               <Square className="w-4 h-4 mr-2" />
               Stop All
-            </Button>
+            </button>
           )}
         </div>
       </div>
@@ -576,16 +586,9 @@ export function PanelMode({
       {activeCameras.length > 0 ? (
         <div className="h-[calc(100vh-200px)] w-full">
           <div className={`grid gap-4 h-full ${currentLayout}`}>
-            {activeCameras.map((camera, index) => (
-              <CameraView
-                key={camera.id}
-                camera={camera}
-                index={index}
-                total={activeCameras.length}
-                layout={activeCameras.length === 5 || activeCameras.length === 6 ? fiveCamLayout : ''}
-                isVisible={isVisible}
-              />
-            ))}
+            {activeCameras.map((camera, index) => 
+              renderCamera(camera, index, activeCameras.length, activeCameras.length === 5 || activeCameras.length === 6 ? fiveCamLayout : '')
+            )}
           </div>
         </div>
       ) : (
@@ -596,10 +599,10 @@ export function PanelMode({
             <p className="text-muted-foreground mb-4">
               Start cameras from the Home tab to view them in panel mode.
             </p>
-            <Button variant="outline" onClick={onExitFullscreen}>
+            <button className="px-4 py-2 border rounded hover:bg-gray-100 dark:hover:bg-gray-800" onClick={onExitFullscreen}>
               <Monitor className="w-4 h-4 mr-2" />
               Go to Home
-            </Button>
+            </button>
           </div>
         </div>
       )}
